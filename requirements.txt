@@ -1,0 +1,9 @@
+langchain_community
+langchain_core
+langchain_Groq
+pypdf
+validators ###which helps you to validate the url
+youtube_transcript_api ###to fetch the transcript
+streamlit
+unstructered
+pytube
