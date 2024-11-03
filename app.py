@@ -1,9 +1,12 @@
+import os
 import validators
 import streamlit as st
 from langchain.prompts import PromptTemplate
 from langchain_groq import ChatGroq
 from langchain.chains.summarize import load_summarize_chain
-from langchain_community.document_loaders import YoutubeLoader, UnstructuredURLLoader
+from langchain_community.document_loaders import UnstructuredURLLoader
+from yt_dlp import YoutubeDL
+from langchain.docstore.document import Document
 
 # Streamlit APP
 st.set_page_config(page_title="Youtube summarizer", page_icon="📺", layout="wide")
@@ -16,8 +19,12 @@ with st.sidebar:
 
 generic_url = st.text_input("URL", label_visibility="collapsed")
 
-# Gemma Model Using Groq API
-llm = ChatGroq(model="Gemma-7b-It", groq_api_key=groq_api_key)
+# Set Groq API key as environment variable
+if groq_api_key.strip():
+    os.environ["GROQ_API_KEY"] = groq_api_key
+    llm = ChatGroq(model="Gemma-7b-It")
+else:
+    st.error("Please provide a valid Groq API Key")
 
 prompt_template = """
 Provide a summary of the following content in 300 words:
@@ -26,7 +33,6 @@ Content:{text}
 prompt = PromptTemplate(template=prompt_template, input_variables=["text"])
 
 if st.button("Summarize the Content from YT or Website"):
-    # Validate all the inputs
     if not groq_api_key.strip() or not generic_url.strip():
         st.error("Please provide the information to get started")
     elif not validators.url(generic_url):
@@ -34,28 +40,34 @@ if st.button("Summarize the Content from YT or Website"):
     else:
         try:
             with st.spinner("Waiting..."):
-                # Loading the website or YT video data
+                docs = []
                 if "youtube.com" in generic_url:
                     try:
-                        loader = YoutubeLoader.from_youtube_url(generic_url, add_video_info=True)
-                        docs = loader.load()
+                        # Use yt_dlp to fetch video title and description
+                        ydl_opts = {"quiet": True, "skip_download": True, "format": "bestaudio/best"}
+                        with YoutubeDL(ydl_opts) as ydl:
+                            info_dict = ydl.extract_info(generic_url, download=False)
+                            title = info_dict.get("title", "No Title")
+                            description = info_dict.get("description", "No Description")
+                            content = f"{title}\n\n{description}"
+                            # Create a Document object with the content
+                            docs = [Document(page_content=content)]
                     except Exception as yt_exception:
-                        st.error(f"Exception while accessing YouTube video: {yt_exception}")
-                        docs = []
+                        st.warning(f"Unable to retrieve YouTube data using yt_dlp: {yt_exception}")
                 else:
                     loader = UnstructuredURLLoader(
                         urls=[generic_url],
                         ssl_verify=False,
-                        headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_5_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36"}
+                        headers={"User-Agent": "Mozilla/5.0"}
                     )
-                    docs = loader.load()
+                    docs = [Document(page_content=doc['text']) for doc in loader.load()]
 
                 if docs:
-                    # Chain For Summarization
+                    # Chain for summarization
                     chain = load_summarize_chain(llm, chain_type="stuff", prompt=prompt)
-                    output_summary = chain.run(docs)
+                    output_summary = chain.invoke(docs)
                     st.success(output_summary)
                 else:
-                    st.error("Failed tco load content from the provided URL.")
+                    st.error("Failed to load content from the provided URL.")
         except Exception as e:
             st.error(f"Exception while processing the URL: {e}")
