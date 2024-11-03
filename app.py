@@ -11,7 +11,7 @@ from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, No
 
 # Streamlit APP
 st.set_page_config(page_title="Youtube summarizer", page_icon="📺", layout="wide")
-st.title("Youtube summarizer")
+st.title("Youtube summarizer📺",)
 st.subheader("Summarize any youtube video in a few seconds")
 
 # Get the Groq API Key and URL (YT or website) to be summarized
