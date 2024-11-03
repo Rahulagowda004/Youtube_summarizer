@@ -7,6 +7,7 @@ from langchain.chains.summarize import load_summarize_chain
 from langchain_community.document_loaders import UnstructuredURLLoader
 from yt_dlp import YoutubeDL
 from langchain.docstore.document import Document
+from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 
 # Streamlit APP
 st.set_page_config(page_title="Youtube summarizer", page_icon="📺", layout="wide")
@@ -32,6 +33,15 @@ Content:{text}
 """
 prompt = PromptTemplate(template=prompt_template, input_variables=["text"])
 
+def get_transcript(video_id):
+    """Retrieve the transcript of the video using youtube_transcript_api."""
+    try:
+        transcript = YouTubeTranscriptApi.get_transcript(video_id)
+        transcript_text = " ".join([entry['text'] for entry in transcript])
+        return transcript_text
+    except (TranscriptsDisabled, NoTranscriptFound):
+        return None
+
 if st.button("Summarize the Content from YT or Website"):
     if not groq_api_key.strip() or not generic_url.strip():
         st.error("Please provide the information to get started")
@@ -43,17 +53,27 @@ if st.button("Summarize the Content from YT or Website"):
                 docs = []
                 if "youtube.com" in generic_url:
                     try:
-                        # Use yt_dlp to fetch video title and description
-                        ydl_opts = {"quiet": True, "skip_download": True, "format": "bestaudio/best"}
-                        with YoutubeDL(ydl_opts) as ydl:
-                            info_dict = ydl.extract_info(generic_url, download=False)
-                            title = info_dict.get("title", "No Title")
-                            description = info_dict.get("description", "No Description")
-                            content = f"{title}\n\n{description}"
-                            # Create a Document object with the content
-                            docs = [Document(page_content=content)]
+                        # Extract video ID from URL
+                        video_id = generic_url.split("v=")[-1].split("&")[0]
+                        
+                        # Attempt to get the transcript
+                        transcript_text = get_transcript(video_id)
+                        
+                        if transcript_text:
+                            # Use transcript as content if available
+                            content = transcript_text
+                        else:
+                            # Fallback to title and description if no transcript
+                            ydl_opts = {"quiet": True, "skip_download": True, "format": "bestaudio/best"}
+                            with YoutubeDL(ydl_opts) as ydl:
+                                info_dict = ydl.extract_info(generic_url, download=False)
+                                title = info_dict.get("title", "No Title")
+                                description = info_dict.get("description", "No Description")
+                                content = f"{title}\n\n{description}"
+                                
+                        docs = [Document(page_content=content)]
                     except Exception as yt_exception:
-                        st.warning(f"Unable to retrieve YouTube data using yt_dlp: {yt_exception}")
+                        st.warning(f"Unable to retrieve YouTube data: {yt_exception}")
                 else:
                     loader = UnstructuredURLLoader(
                         urls=[generic_url],
@@ -65,7 +85,7 @@ if st.button("Summarize the Content from YT or Website"):
                 if docs:
                     # Chain for summarization
                     chain = load_summarize_chain(llm, chain_type="stuff", prompt=prompt)
-                    output_summary = chain.invoke(docs)
+                    output_summary = chain.run(docs)
                     st.success(output_summary)
                 else:
                     st.error("Failed to load content from the provided URL.")
